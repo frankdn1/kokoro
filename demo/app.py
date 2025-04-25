@@ -4,6 +4,7 @@ import gradio as gr
 import os
 import random
 import torch
+MPS_AVAILABLE = torch.backends.mps.is_available() if hasattr(torch.backends, 'mps') else False
 
 CUDA_AVAILABLE = torch.cuda.is_available()
 models = {gpu: KModel().to('cuda' if gpu else 'cpu').eval() for gpu in [False] + ([True] if CUDA_AVAILABLE else [])}
@@ -19,6 +20,7 @@ def generate_first(text, voice='af_heart', speed=1, use_gpu=CUDA_AVAILABLE):
     pipeline = pipelines[voice[0]]
     pack = pipeline.load_voice(voice)
     use_gpu = use_gpu and CUDA_AVAILABLE
+    backend = 'GPU' if use_gpu else 'MPS' if MPS_AVAILABLE else 'CPU'
     for _, ps, _ in pipeline(text, voice, speed):
         ref_s = pack[len(ps)-1]
         try:
@@ -31,10 +33,12 @@ def generate_first(text, voice='af_heart', speed=1, use_gpu=CUDA_AVAILABLE):
                 gr.Warning(str(e))
                 gr.Info('Retrying with CPU. To avoid this error, change Hardware to CPU.')
                 audio = models[False](ps, ref_s, speed)
+                backend = 'CPU'
             else:
                 raise gr.Error(e)
-        return (24000, audio.numpy()), ps
-    return None, ''
+        gr.Info(f'Running on {backend} backend')
+        return (24000, audio.numpy()), ps, backend
+    return None, '', ''
 
 # Arena API
 def predict(text, voice='af_heart', speed=1):
@@ -132,6 +136,7 @@ with gr.Blocks() as generate_tab:
     generate_btn = gr.Button('Generate', variant='primary')
     with gr.Accordion('Output Tokens', open=True):
         out_ps = gr.Textbox(interactive=False, show_label=False, info='Tokens used to generate the audio, up to 510 context length.')
+        out_backend = gr.Textbox(interactive=False, show_label=False, info='Current computation backend')
         tokenize_btn = gr.Button('Tokenize', variant='secondary')
         gr.Markdown(TOKEN_NOTE)
         predict_btn = gr.Button('Predict', variant='secondary', visible=False)
@@ -155,13 +160,19 @@ with gr.Blocks() as app:
             text = gr.Textbox(label='Input Text', info=f"Arbitrarily many characters supported")
             with gr.Row():
                 voice = gr.Dropdown(list(CHOICES.items()), value='af_heart', label='Voice', info='Quality and availability vary by language')
-                use_gpu = gr.Dropdown(
-                    [('ZeroGPU 🚀', True), ('CPU 🐌', False)],
-                    value=CUDA_AVAILABLE,
-                    label='Hardware',
-                    info='GPU is usually faster, but has a usage quota',
-                    interactive=CUDA_AVAILABLE
-                )
+                with gr.Column():
+                    use_gpu = gr.Dropdown(
+                        [('ZeroGPU 🚀', True), ('CPU 🐌', False)],
+                        value=CUDA_AVAILABLE,
+                        label='Hardware',
+                        info='GPU is usually faster, but has a usage quota',
+                        interactive=CUDA_AVAILABLE
+                    )
+                    backend_info = gr.Textbox(
+                        label='Active Backend',
+                        value='GPU' if CUDA_AVAILABLE else 'MPS' if MPS_AVAILABLE else 'CPU',
+                        interactive=False
+                    )
             speed = gr.Slider(minimum=0.5, maximum=2, value=1, step=0.1, label='Speed')
             random_btn = gr.Button('🎲 Random Quote 💬', variant='secondary')
             with gr.Row():
@@ -172,7 +183,7 @@ with gr.Blocks() as app:
     random_btn.click(fn=get_random_quote, inputs=[], outputs=[text])
     gatsby_btn.click(fn=get_gatsby, inputs=[], outputs=[text])
     frankenstein_btn.click(fn=get_frankenstein, inputs=[], outputs=[text])
-    generate_btn.click(fn=generate_first, inputs=[text, voice, speed, use_gpu], outputs=[out_audio, out_ps])
+    generate_btn.click(fn=generate_first, inputs=[text, voice, speed, use_gpu], outputs=[out_audio, out_ps, backend_info])
     tokenize_btn.click(fn=tokenize_first, inputs=[text, voice], outputs=[out_ps])
     stream_event = stream_btn.click(fn=generate_all, inputs=[text, voice, speed, use_gpu], outputs=[out_stream])
     stop_btn.click(fn=None, cancels=stream_event)

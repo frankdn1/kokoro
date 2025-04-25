@@ -7,6 +7,7 @@ export default function App() {
 
   const [inputText, setInputText] = useState("Life is like a box of chocolates. You never know what you're gonna get.");
   const [selectedSpeaker, setSelectedSpeaker] = useState("af_heart");
+  const [streamAudio, setStreamAudio] = useState(null);
 
   const [voices, setVoices] = useState([]);
   const [status, setStatus] = useState(null);
@@ -14,6 +15,8 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState("Loading...");
 
   const [results, setResults] = useState([]);
+  const [streaming, setStreaming] = useState(false);
+  const [streamChunks, setStreamChunks] = useState([]);
 
   // We use the `useEffect` hook to setup the worker as soon as the `App` component is mounted.
   useEffect(() => {
@@ -37,8 +40,14 @@ export default function App() {
           break;
         case "complete":
           const { audio, text } = e.data;
-          // Generation complete: re-enable the "Generate" button
           setResults((prev) => [{ text, src: audio }, ...prev]);
+          setStatus("ready");
+          break;
+        case "stream_chunk":
+          setStreamAudio(e.data.audio);
+          break;
+        case "stream_complete":
+          setStreaming(false);
           setStatus("ready");
           break;
       }
@@ -69,6 +78,22 @@ export default function App() {
       text: inputText.trim(),
       voice: selectedSpeaker,
     });
+  };
+
+  const handleStream = () => {
+    setStreaming(true);
+    setStatus("running");
+    worker.current.postMessage({
+      type: "stream",
+      text: inputText.trim(),
+      voice: selectedSpeaker,
+    });
+  };
+
+  const handleStop = () => {
+    setStreaming(false);
+    setStatus("ready");
+    // Worker will handle cleanup when stream completes
   };
 
   return (
@@ -105,12 +130,32 @@ export default function App() {
                   </option>
                 ))}
               </select>
-              <button type="submit" className="inline-flex justify-center items-center px-6 py-2 text-lg font-semibold bg-gradient-to-t from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-colors duration-300 rounded-xl text-white disabled:opacity-50" disabled={status === "running" || inputText.trim() === ""}>
-                {status === "running" ? "Generating..." : "Generate"}
-              </button>
+              <div className="flex space-x-4">
+                <button type="submit" className="inline-flex justify-center items-center px-6 py-2 text-lg font-semibold bg-gradient-to-t from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-colors duration-300 rounded-xl text-white disabled:opacity-50" disabled={status === "running" || inputText.trim() === ""}>
+                  {status === "running" && !streaming ? "Generating..." : "Generate"}
+                </button>
+                {!streaming ? (
+                  <button type="button" onClick={handleStream} className="inline-flex justify-center items-center px-6 py-2 text-lg font-semibold bg-gradient-to-t from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 transition-colors duration-300 rounded-xl text-white disabled:opacity-50" disabled={status === "running" || inputText.trim() === ""}>
+                    Stream
+                  </button>
+                ) : (
+                  <button type="button" onClick={handleStop} className="inline-flex justify-center items-center px-6 py-2 text-lg font-semibold bg-gradient-to-t from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 transition-colors duration-300 rounded-xl text-white">
+                    Stop
+                  </button>
+                )}
+              </div>
             </div>
           </form>
         </div>
+
+        {streaming && streamAudio && (
+          <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5 }} className="bg-gray-800/70 backdrop-blur-sm border border-gray-700 rounded-lg p-4">
+            <h3 className="text-white mb-2">Streaming Audio</h3>
+            <audio controls src={streamAudio} autoPlay className="w-full">
+              Your browser does not support the audio element.
+            </audio>
+          </motion.div>
+        )}
 
         {results.length > 0 && (
           <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5 }} className="max-h-[250px] overflow-y-auto px-2 mt-4 space-y-6 relative z-[2]">

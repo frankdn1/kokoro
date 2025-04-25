@@ -18,12 +18,25 @@ self.postMessage({ status: "ready", voices: tts.voices, device });
 
 // Listen for messages from the main thread
 self.addEventListener("message", async (e) => {
-  const { text, voice } = e.data;
+  const { type, text, voice } = e.data;
 
-  // Generate speech
-  const audio = await tts.generate(text, { voice });
+  if (type === "generate") {
+    // Generate speech
+    const audio = await tts.generate(text, { voice });
 
-  // Send the audio file back to the main thread
-  const blob = audio.toBlob();
-  self.postMessage({ status: "complete", audio: URL.createObjectURL(blob), text });
+    // Send the audio file back to the main thread
+    const blob = audio.toBlob();
+    self.postMessage({ status: "complete", audio: URL.createObjectURL(blob), text });
+  } else if (type === "stream") {
+    // Stream speech chunks
+    for await (const { audio } of tts.stream(text, { voice })) {
+      const blob = audio.toBlob();
+      self.postMessage({
+        status: "stream_chunk",
+        audio: URL.createObjectURL(blob),
+        text
+      });
+    }
+    self.postMessage({ status: "stream_complete" });
+  }
 });
