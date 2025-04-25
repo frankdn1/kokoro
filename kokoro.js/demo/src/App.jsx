@@ -7,7 +7,7 @@ export default function App() {
 
   const [inputText, setInputText] = useState("Life is like a box of chocolates. You never know what you're gonna get.");
   const [selectedSpeaker, setSelectedSpeaker] = useState("af_heart");
-  const [streamAudio, setStreamAudio] = useState(null);
+  const [streamAudioUrl, setStreamAudioUrl] = useState(null); // Renamed state
 
   const [voices, setVoices] = useState([]);
   const [status, setStatus] = useState(null);
@@ -27,6 +27,7 @@ export default function App() {
 
     // Create a callback function for messages from the worker thread.
     const onMessageReceived = (e) => {
+      console.log("Worker message received:", e.data);
       switch (e.data.status) {
         case "device":
           setLoadingMessage(`Loading model (device="${e.data.device}")`);
@@ -44,9 +45,14 @@ export default function App() {
           setStatus("ready");
           break;
         case "stream_chunk":
-          setStreamAudio(e.data.audio);
+          console.log("Stream chunk received:", e.data);
+          // Only set the audio URL on the first chunk to avoid reloading the player
+          if (!streamAudioUrl) {
+            setStreamAudioUrl(e.data.audio);
+          }
           break;
         case "stream_complete":
+          console.log("Stream completed");
           setStreaming(false);
           setStatus("ready");
           break;
@@ -81,6 +87,7 @@ export default function App() {
   };
 
   const handleStream = () => {
+    setStreamAudioUrl(null); // Reset audio URL when starting new stream
     setStreaming(true);
     setStatus("running");
     worker.current.postMessage({
@@ -148,12 +155,18 @@ export default function App() {
           </form>
         </div>
 
-        {streaming && streamAudio && (
+        {/* Keep player visible once first chunk arrives, even after streaming stops */}
+        {streamAudioUrl && (
           <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5 }} className="bg-gray-800/70 backdrop-blur-sm border border-gray-700 rounded-lg p-4">
             <h3 className="text-white mb-2">Streaming Audio</h3>
-            <audio controls src={streamAudio} autoPlay className="w-full">
-              Your browser does not support the audio element.
-            </audio>
+            {streamAudioUrl ? (
+              <audio controls src={streamAudioUrl} className="w-full">
+                Your browser does not support the audio element.
+              </audio>
+            ) : (
+              // This case should technically not be reached if outer condition is streamAudioUrl
+              <p className="text-gray-300">Processing audio stream...</p>
+            )}
           </motion.div>
         )}
 

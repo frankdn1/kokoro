@@ -134,18 +134,45 @@ export class KokoroTTS {
     } else {
       throw new Error("Invalid input type. Expected string or TextSplitterStream.");
     }
-    for await (const sentence of splitter) {
-      const phonemes = await phonemize(sentence, language);
-      const { input_ids } = this.tokenizer(phonemes, {
-        truncation: true,
-      });
 
-      // TODO: There may be some cases where - even with splitting - the text is too long.
-      // In that case, we should split the text into smaller chunks and process them separately.
-      // For now, we just truncate these exceptionally long chunks
-      const audio = await this.generate_from_ids(input_ids, { voice, speed });
-      yield { text: sentence, phonemes, audio };
+    console.log("[KokoroTTS.stream] Getting splitter async iterator...");
+    const sentenceIterator = splitter[Symbol.asyncIterator]();
+    console.log("[KokoroTTS.stream] Starting manual iteration loop...");
+
+    try { // Add top-level try/catch within the generator
+      while (true) {
+        console.log("[KokoroTTS.stream] Calling sentenceIterator.next()...");
+        const { value: sentence, done } = await sentenceIterator.next();
+        console.log(`[KokoroTTS.stream] sentenceIterator.next() returned: done=${done}, value=${sentence ? `"${sentence.substring(0, 30)}..."` : sentence}`);
+
+        if (done) {
+          console.log("[KokoroTTS.stream] Splitter iteration finished (done=true). Breaking loop.");
+          break; // Exit the loop when the splitter is done
+        }
+
+        if (sentence) {
+          console.log("[KokoroTTS.stream] Processing sentence:", sentence);
+          const phonemes = await phonemize(sentence, language);
+          console.log("[KokoroTTS.stream] Phonemized:", phonemes);
+          const { input_ids } = this.tokenizer(phonemes, { truncation: true });
+          console.log("[KokoroTTS.stream] Tokenized input_ids:", input_ids);
+
+          // TODO: Handle potential truncation issues for very long sentences after splitting.
+          console.log("[KokoroTTS.stream] Generating audio for sentence...");
+          const audio = await this.generate_from_ids(input_ids, { voice, speed });
+          console.log("[KokoroTTS.stream] Audio generated, yielding chunk.");
+          yield { text: sentence, phonemes, audio };
+        } else {
+          // This case might occur if the iterator yields undefined before being done, though unlikely with current splitter logic.
+          console.warn("[KokoroTTS.stream] Splitter yielded undefined/null value without being done. Continuing loop.");
+        }
+      }
+    } catch (error) {
+      console.error("[KokoroTTS.stream] Error within generator loop:", error);
+      // Optionally re-throw or handle differently if needed
+      throw error; // Re-throwing allows the consumer's catch block to also see it
     }
+    console.log("[KokoroTTS.stream] Exiting stream generator function.");
   }
 }
 

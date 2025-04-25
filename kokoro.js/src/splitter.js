@@ -119,6 +119,7 @@ export class TextSplitterStream {
    * @param  {...string} texts Text fragments to process.
    */
   push(...texts) {
+    console.log("[Splitter.push] Received texts:", texts);
     for (const txt of texts) {
       this._buffer += txt;
       this._process();
@@ -131,6 +132,7 @@ export class TextSplitterStream {
    * and allow the consuming process to finish processing the stream.
    */
   close() {
+    console.log("[Splitter.close] Called.");
     if (this._closed) {
       throw new Error("Stream is already closed.");
     }
@@ -142,6 +144,7 @@ export class TextSplitterStream {
    * Flushes any remaining text in the buffer as a sentence.
    */
   flush() {
+    console.log("[Splitter.flush] Called. Buffer:", `"${this._buffer}"`);
     const remainder = this._buffer.trim();
     if (remainder.length > 0) {
       this._sentences.push(remainder);
@@ -155,6 +158,7 @@ export class TextSplitterStream {
    * @private
    */
   _resolve() {
+    console.log(`[Splitter._resolve] Called. Resolver exists: ${!!this._resolver}`);
     if (this._resolver) {
       this._resolver();
       this._resolver = null;
@@ -168,6 +172,7 @@ export class TextSplitterStream {
    * @private
    */
   _process() {
+    console.log(`[Splitter._process] Processing buffer: "${this._buffer}"`);
     let sentenceStart = 0;
     const buffer = this._buffer;
     const len = buffer.length;
@@ -216,6 +221,7 @@ export class TextSplitterStream {
 
         // Wait for more text if there's no non-whitespace character yet.
         if (nextNonSpace === len) {
+          console.log("[Splitter._process] Potential boundary at end of buffer, waiting for more text.");
           break;
         }
 
@@ -270,6 +276,7 @@ export class TextSplitterStream {
 
         // Accept the sentence boundary.
         if (sentence) {
+          console.log("[Splitter._process] Found sentence:", sentence);
           this._sentences.push(sentence);
         }
         // Move to the next sentence.
@@ -283,6 +290,7 @@ export class TextSplitterStream {
     this._buffer = buffer.substring(sentenceStart);
 
     // Resolve any pending promise if sentences are available.
+    console.log(`[Splitter._process] Finished processing. Sentences available: ${this._sentences.length > 0}. Buffer remaining: "${this._buffer}"`);
     if (this._sentences.length > 0) {
       this._resolve();
     }
@@ -298,17 +306,23 @@ export class TextSplitterStream {
     }
     while (true) {
       if (this._sentences.length > 0) {
-        yield this._sentences.shift();
+        const sentence = this._sentences.shift();
+        console.log("[Splitter.iterator] Yielding sentence:", sentence);
+        yield sentence;
       } else if (this._closed) {
+        console.log("[Splitter.iterator] Stream closed, breaking loop.");
         // No more text will be pushed.
         break;
       } else {
+        console.log("[Splitter.iterator] No sentences available, waiting for more text...");
         // Wait for more text.
         await new Promise((resolve) => {
           this._resolver = resolve;
         });
+        console.log("[Splitter.iterator] Woke up after waiting.");
       }
     }
+    console.log("[Splitter.iterator] Exiting iterator.");
   }
 
   /**
