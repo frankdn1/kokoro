@@ -7,7 +7,9 @@ export default function App() {
 
   const [inputText, setInputText] = useState("Life is like a box of chocolates. You never know what you're gonna get.");
   const [selectedSpeaker, setSelectedSpeaker] = useState("af_heart");
-  const [streamAudioUrl, setStreamAudioUrl] = useState(null); // Renamed state
+  const audioRef = useRef(null);
+  const [streamStatus, setStreamStatus] = useState('idle'); // 'idle'|'loading'|'streaming'|'complete'
+  const [currentAudioUrl, setCurrentAudioUrl] = useState(null);
 
   const [voices, setVoices] = useState([]);
   const [status, setStatus] = useState(null);
@@ -16,7 +18,8 @@ export default function App() {
 
   const [results, setResults] = useState([]);
   const [streaming, setStreaming] = useState(false);
-  const [streamChunks, setStreamChunks] = useState([]);
+  const [audioQueue, setAudioQueue] = useState([]);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   // We use the `useEffect` hook to setup the worker as soon as the `App` component is mounted.
   useEffect(() => {
@@ -44,17 +47,47 @@ export default function App() {
           setResults((prev) => [{ text, src: audio }, ...prev]);
           setStatus("ready");
           break;
-        case "stream_chunk":
-          console.log("Stream chunk received:", e.data);
-          // Only set the audio URL on the first chunk to avoid reloading the player
-          if (!streamAudioUrl) {
-            setStreamAudioUrl(e.data.audio);
+        case "stream_loading":
+          setLoadingMessage("Processing audio stream...");
+          break;
+        case "stream_progress":
+          console.log("Stream progress:", e.data);
+          setStreamStatus('streaming');
+          setCurrentAudioUrl(e.data.audio);
+          
+          // Add new audio chunk to queue
+          setAudioQueue(prev => [...prev, e.data.audio]);
+          
+          // Initialize audio element if needed
+          if (!audioRef.current) {
+            audioRef.current = new Audio();
+            audioRef.current.addEventListener('ended', () => {
+              // Play next chunk if available
+              const nextChunk = audioQueue[0];
+              if (nextChunk) {
+                setAudioQueue(prev => prev.slice(1));
+                audioRef.current.src = nextChunk;
+                audioRef.current.play().catch(e => console.error("Audio play error:", e));
+              } else {
+                setIsPlaying(false);
+                setStreamStatus('complete');
+              }
+            });
+            
+            // Start playing first chunk
+            audioRef.current.src = e.data.audio;
+            audioRef.current.play().catch(e => console.error("Audio play error:", e));
           }
           break;
         case "stream_complete":
           console.log("Stream completed");
           setStreaming(false);
           setStatus("ready");
+          // Keep the player visible after completion
+          if (e.data.audio) {
+            setCurrentAudioUrl(e.data.audio);
+            setStreamStatus('complete');
+          }
           break;
       }
     };
@@ -86,10 +119,19 @@ export default function App() {
     });
   };
 
+
   const handleStream = () => {
-    setStreamAudioUrl(null); // Reset audio URL when starting new stream
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setCurrentAudioUrl(null);
+    setAudioQueue([]);
+    setIsPlaying(false);
+    setStreamStatus('loading');
     setStreaming(true);
     setStatus("running");
+    setLoadingMessage("Starting stream...");
     worker.current.postMessage({
       type: "stream",
       text: inputText.trim(),
@@ -155,18 +197,30 @@ export default function App() {
           </form>
         </div>
 
-        {/* Keep player visible once first chunk arrives, even after streaming stops */}
-        {streamAudioUrl && (
-          <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5 }} className="bg-gray-800/70 backdrop-blur-sm border border-gray-700 rounded-lg p-4">
-            <h3 className="text-white mb-2">Streaming Audio</h3>
-            {streamAudioUrl ? (
-              <audio controls src={streamAudioUrl} className="w-full">
-                Your browser does not support the audio element.
-              </audio>
-            ) : (
-              // This case should technically not be reached if outer condition is streamAudioUrl
+        {/* Audio player section - always visible once streaming starts */}
+        {(streamStatus === 'loading' || streamStatus === 'streaming' || streamStatus === 'complete') && (
+          <motion.div
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.5 }}
+            className="bg-gray-800/70 backdrop-blur-sm border border-gray-700 rounded-lg p-4"
+          >
+            <h3 className="text-white mb-2">
+              {streamStatus === 'loading' ? 'Loading...' :
+               streamStatus === 'streaming' ? 'Streaming Audio' :
+               'Stream Complete'}
+            </h3>
+            
+            {streamStatus === 'loading' ? (
               <p className="text-gray-300">Processing audio stream...</p>
-            )}
+            ) : currentAudioUrl ? (
+              <audio
+                controls
+                src={currentAudioUrl}
+                className="w-full"
+                autoPlay
+              />
+            ) : null}
           </motion.div>
         )}
 

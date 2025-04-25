@@ -53,10 +53,16 @@ self.addEventListener("message", async (e) => {
       }
     };
 
-    // Function to consume stream manually
+    // Function to consume stream and concatenate audio
     const consumeStream = async () => {
       console.log("Starting stream consumption (manual)...");
       const streamIterator = stream[Symbol.asyncIterator]();
+      const audioChunks = [];
+      let fullText = "";
+      
+      // Send initial loading state
+      self.postMessage({ status: "stream_loading" });
+
       try {
         while (true) {
           console.log("Calling streamIterator.next()...");
@@ -64,32 +70,44 @@ self.addEventListener("message", async (e) => {
           console.log(`streamIterator.next() returned: done=${done}`);
 
           if (done) {
-            console.log("Stream consumption finished (done=true).");
-            self.postMessage({ status: "stream_complete" });
+            // Send final chunk when stream completes
+            if (audioChunks.length > 0) {
+              // Send final audio chunk
+              const blob = await audioChunks[audioChunks.length-1].toBlob();
+              const audioUrl = URL.createObjectURL(blob);
+              
+              self.postMessage({
+                status: "stream_complete",
+                audio: audioUrl,
+                text: fullText.trim(),
+                chunks: audioChunks.length,
+                isFinal: true
+              });
+            } else {
+              self.postMessage({ status: "stream_complete" });
+            }
             break;
           }
 
           if (chunk) {
             const { text: chunkText, audio } = chunk;
             console.log("Processing chunk - Text:", chunkText);
-            try {
-              console.log("Processing chunk - Audio data received:", audio);
-              const blob = await audio.toBlob();
-              console.log("Processing chunk - Blob created:", blob);
-              const audioUrl = URL.createObjectURL(blob);
-              console.log("Processing chunk - Audio URL created:", audioUrl);
-              self.postMessage({
-                status: "stream_chunk",
-                audio: audioUrl,
-                text: chunkText
-              });
-              console.log("Processing chunk - Message posted to main thread");
-            } catch (e) {
-              console.error("Audio processing error for chunk:", e);
-              self.postMessage({ status: "error", error: `Audio processing error: ${e.message}` });
-            }
+            fullText += chunkText + " ";
+            audioChunks.push(audio);
+            
+            // Create and send audio blob for this chunk
+            const blob = await audio.toBlob();
+            const audioUrl = URL.createObjectURL(blob);
+            
+            self.postMessage({
+              status: "stream_progress",
+              audio: audioUrl,
+              text: fullText.trim(),
+              chunkCount: audioChunks.length,
+              isFinal: false
+            });
           } else {
-             console.warn("Stream yielded undefined/null value without being done.");
+            console.warn("Stream yielded undefined/null value without being done.");
           }
         }
       } catch (error) {
